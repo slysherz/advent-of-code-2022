@@ -19,7 +19,7 @@ fn get_most_calories(str: String) -> i32 {
 }
 
 #[test]
-fn day1_example1() {
+fn example1() {
     let result = get_most_calories(String::from(
         "
     1000
@@ -62,7 +62,7 @@ fn get_top3_most_calories(str: String) -> i32 {
 }
 
 #[test]
-fn day1_example2() {
+fn example2() {
     let result = get_top3_most_calories(String::from(
         "
     1000

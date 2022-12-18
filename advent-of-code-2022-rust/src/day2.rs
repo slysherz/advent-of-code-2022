@@ -109,7 +109,7 @@ fn calculate_score2(str: String) -> i32 {
 }
 
 #[test]
-fn day2_example1() {
+fn example1() {
     let score = calculate_score1(String::from(
         "A Y
         B X
@@ -121,7 +121,7 @@ fn day2_example1() {
 }
 
 #[test]
-fn day2_example2() {
+fn example2() {
     let score = calculate_score2(String::from(
         "A Y
         B X
