@@ -1,4 +1,4 @@
-use std::fs;
+use std::{collections::HashMap, fs};
 
 type Rock = Vec<u16>;
 type PackedRock = u64;
@@ -75,9 +75,105 @@ fn draw_rock(rock: &Rock, name: &str) {
     println!("{}", result);
 }
 
+fn simulate_rock(ground: &mut Rock, jets: &Vec<bool>, tick: &mut usize, mut rock: PackedRock) {
+    let edge = 0b100000001;
+    let walls: PackedRock = pack_rock(vec![edge, edge, edge, edge]);
+    rock = right(rock, 3);
+    let free = free_rows(&ground);
+    for _ in 0..(4 - free) {
+        ground.push(0);
+    }
+    let height = ground.len() - 1;
+
+    for h in (0..height).rev() {
+        // Apply jet
+        let new_rock = if jets[*tick % jets.len()] {
+            left(rock, 1)
+        } else {
+            right(rock, 1)
+        };
+        *tick += 1;
+
+        rock = if hits_packed(walls, new_rock) || hits(&ground, &new_rock, h + 1) {
+            rock
+        } else {
+            new_rock
+        };
+
+        // Try to land the rock
+        if hits(&ground, &rock, h) {
+            ground[1 + h] |= (rock >> 0 & 0b111111111) as u16;
+            ground[2 + h] |= (rock >> 16 & 0b111111111) as u16;
+            ground[3 + h] |= (rock >> 32 & 0b111111111) as u16;
+            ground[4 + h] |= (rock >> 48 & 0b111111111) as u16;
+
+            // draw_rock(&ground, "GROUND");
+            break;
+        }
+    }
+}
+
+fn tower_height(ground: &Rock) -> usize {
+    ground.len() - free_rows(&ground)
+}
+
+// Quick way to compare if the top of the tower looks the same
+fn heuristic(ground: &Rock) -> PackedRock {
+    let height = ground.len() - free_rows(ground);
+    pack_rock(ground[height - 4..height].to_vec())
+}
+
+fn find_rock_loop(
+    mut ground: Rock,
+    jets: &Vec<bool>,
+    shapes: &Vec<PackedRock>,
+    steps: usize,
+) -> Option<((usize, usize, usize), (usize, usize, usize))> {
+    let warmup = 5;
+
+    let mut tick = 0;
+    let mut shape_id = 0;
+    for _ in 0..warmup {
+        simulate_rock(
+            &mut ground,
+            &jets,
+            &mut tick,
+            shapes[shape_id % shapes.len()],
+        );
+        shape_id += 1;
+        tick = tick % jets.len();
+    }
+
+    let mut log: HashMap<(usize, usize, u64), (usize, usize, usize)> = HashMap::new();
+    for _ in warmup..steps {
+        let key1 = (
+            shape_id % shapes.len(),
+            tick % jets.len(),
+            heuristic(&ground),
+        );
+        let current_height = tower_height(&ground);
+        let new_entry = (current_height, shape_id, tick);
+
+        if let Some(&entry) = log.get(&key1) {
+            return Some((entry, new_entry));
+        }
+
+        simulate_rock(
+            &mut ground,
+            &jets,
+            &mut tick,
+            shapes[shape_id % shapes.len()],
+        );
+        log.insert(key1, new_entry);
+        shape_id += 1;
+    }
+
+    None
+}
+
 fn solve(str: &str, steps: usize) -> usize {
-    let destroy_cutoff = 10000;
-    let max_fall_distance = 200;
+    let jets = parse(str);
+    let start_ground: Rock = vec![0b111111111];
     let shapes: Vec<PackedRock> = vec![
         vec![0b1111],
         vec![0b010, 0b111, 0b010],
@@ -89,67 +185,31 @@ fn solve(str: &str, steps: usize) -> usize {
     .map(|r| pack_rock(r.to_vec()))
     .collect();
 
-    let edge = 0b100000001;
-    let walls: PackedRock = pack_rock(vec![edge, edge, edge, edge]);
-    let jets = parse(str);
-    let mut ground: Rock = vec![0b111111111];
-    let mut tick = 0;
-    let mut max_descent = 0;
-    let mut destroyed_rows = 0;
-
-    for rock_id in 0..steps {
-        if ground.len() > destroy_cutoff + max_fall_distance {
-            ground = ground[destroy_cutoff..ground.len()].to_vec();
-            destroyed_rows += destroy_cutoff;
+    // Find out when the tower starts repeating
+    let res = find_rock_loop(start_ground.clone(), &jets, &shapes, steps);
+    if res.is_none() {
+        let mut ground = start_ground.clone();
+        let mut tick: usize = 0;
+        for i in 0..steps {
+            simulate_rock(&mut ground, &jets, &mut tick, shapes[i % shapes.len()]);
         }
-
-        if rock_id % (1000000000000 / 10000) == 0 {
-            println!(
-                "{} | 10000  {}",
-                rock_id / (1000000000000 / 10000),
-                max_descent
-            );
-        }
-
-        let mut rock = right(shapes[rock_id % shapes.len()], 3);
-        let free = free_rows(&ground);
-        for _ in 0..(4 - free) {
-            ground.push(0);
-        }
-        let height = ground.len() - 1;
-        // draw_rock(&rock, "ROCK");
-
-        for h in (0..height).rev() {
-            // Apply jet
-            let new_rock = if jets[tick % jets.len()] {
-                left(rock, 1)
-            } else {
-                right(rock, 1)
-            };
-            tick += 1;
-
-            rock = if hits_packed(walls, new_rock) || hits(&ground, &new_rock, h + 1) {
-                rock
-            } else {
-                new_rock
-            };
-            // draw_rock(&rock, "ROCK");
-
-            // Try to land the rock
-            if hits(&ground, &rock, h) {
-                ground[1 + h] |= (rock >> 0 & 0b111111111) as u16;
-                ground[2 + h] |= (rock >> 16 & 0b111111111) as u16;
-                ground[3 + h] |= (rock >> 32 & 0b111111111) as u16;
-                ground[4 + h] |= (rock >> 48 & 0b111111111) as u16;
-
-                // draw_rock(&ground, "GROUND");
-                max_descent = usize::max(max_descent, ground.len() - h);
-                break;
-            }
-        }
+        return tower_height(&ground) - 1;
     }
 
-    destroyed_rows + ground.len() - free_rows(&ground) - 1
+    let ((h1, s1, _t1), (h2, s2, _t2)) = res.unwrap();
+    let h_diff = h2 - h1;
+    let s_diff = s2 - s1;
+    let shapes_left = (steps - s1) % s_diff;
+    let repeats = (steps - s1) / s_diff;
+
+    let mut tick: usize = 0;
+    let mut ground = start_ground;
+
+    for i in 0..(s1 + shapes_left) {
+        simulate_rock(&mut ground, &jets, &mut tick, shapes[i % shapes.len()]);
+    }
+
+    tower_height(&ground) + h_diff * repeats - 1
 }
 
 #[test]
@@ -158,9 +218,10 @@ fn example1() {
     assert_eq!(result, 3068);
 }
 
+#[test]
 fn example2() {
     let result = solve(">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>", 1000000000000);
-    assert_eq!(result, 3068);
+    assert_eq!(result, 1514285714288);
 }
 
 fn main() {
